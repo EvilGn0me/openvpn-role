@@ -1,0 +1,30 @@
+#!/bin/expect -f
+
+set domain [lindex $argv 0]
+
+spawn /opt/easyrsa/build-key client
+expect "Country Name (2 letter code)*:"
+send "\r"
+expect "State or Province Name (full name)*:"
+send "\r"
+expect "Locality Name (eg, city)*:"
+send "\r"
+expect "Organization Name (eg, company)*:"
+send "\r"
+expect "Organizational Unit Name (eg, section)*:"
+send "\r"
+expect "Common Name (eg, your name or your server's hostname)*:"
+send "$domain\r"
+expect "Name*:"
+send "\r"
+expect "Email Address*:"
+send "\r"
+expect "A challenge password*:"
+send "\r"
+expect "An optional company name*:"
+send "\r"
+expect "Sign the certificate?*:"
+send "y \r"
+expect "1 out of 1 certificate requests certified, commit?*:"
+send "y \r"
+expect eof

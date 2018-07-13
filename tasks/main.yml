@@ -1,0 +1,139 @@
+---
+# tasks file for openvpn-role
+- name: Load a variable file based on the OS type.
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution|lower }}.yml"
+    - "{{ ansible_os_family|lower }}.yml"
+
+- name: pre-requisites tasks
+  import_tasks: redhat.yml
+  when: ansible_os_family|lower == 'redhat'
+
+- name: create dirs
+  file:
+    path: '{{ item }}'
+    state: directory
+    recurse: yes
+  with_items:
+    - /tmp/easyrsa
+    - '{{ openvpn.easyrsa.dir }}'
+    - '{{ openvpn_conf.client_conf_dir }}'
+
+- name: create dirs
+  file:
+    path: '{{ openvpn_conf.client_conf_dir }}/{{ item }}'
+    state: directory
+    recurse: yes
+  with_items:
+    - '{{ openvpn_conf.clients }}'
+
+
+- name: enable masquerade
+  firewalld:
+    masquerade: yes
+    state: present
+    permanent: true
+    zone: internal
+  when: openvpn_conf.firewalld
+
+- name: add tun0 to zone internal
+  firewalld:
+    zone: internal
+    interface: tun0
+    permanent: true
+    state: enabled
+  when: openvpn_conf.firewalld
+
+- name: download easyrsa
+  unarchive:
+    src: '{{ openvpn.easyrsa.url }}'
+    dest: '/tmp/easyrsa'
+    remote_src: yes
+    creates: '/opt/easyrsa/build-ca'
+
+- name: install easyrsa
+  shell: 'mv /tmp/easyrsa/easy-rsa-old-2.3.3/easy-rsa/2.0/* {{ openvpn.easyrsa.dir}}/.'
+  args:
+    creates: '/opt/easyrsa/build-ca'
+
+- name: manage easyrsa vars
+  template:
+    src: templates/vars.easyrsa
+    dest: '{{ openvpn.easyrsa.dir }}/vars'
+
+- name: manage openvpn server config
+  template:
+    src: templates/server.conf
+    dest: '/etc/openvpn/server.conf'
+  notify: "restart openvpn"
+
+- name: manage openvpn sysctl config
+  template:
+    src: templates/sysctl.conf
+    dest: '/etc/sysctl.d/openvpn.conf'
+  notify: "restart openvpn"
+
+- name: manage client generation key script
+  template:
+    src: templates/generate_client_key.exp
+    dest: '/usr/local/bin/generate_client_key.exp'
+    mode: 0744
+
+- name: use cleanall
+  shell: bash -lc "source ./vars && ./clean-all"
+  args:
+    chdir: '{{ openvpn.easyrsa.dir}}'
+    creates: '{{ openvpn.easyrsa.dir}}/keys/index.txt'
+
+- name: create ca
+  shell: bash -lc "source ./vars && ./pkitool --initca"
+  args:
+    chdir: '{{ openvpn.easyrsa.dir}}'
+    creates: '{{ openvpn.easyrsa.dir}}/keys/ca.crt'
+
+- name: create key and certificate
+  shell: bash -lc "source ./vars && ./pkitool --server server"
+  args:
+    chdir: '{{ openvpn.easyrsa.dir}}'
+    creates: '{{ openvpn.easyrsa.dir}}/keys/server.crt'
+
+- name: create dh
+  shell: bash -lc "source ./vars && ./build-dh"
+  args:
+    chdir: '{{ openvpn.easyrsa.dir}}'
+    creates: '{{ openvpn.easyrsa.dir}}/keys/dh2048.pem'
+
+- name: create client key
+  shell: bash -lc 'source ./vars && /usr/local/bin/generate_client_key.exp {{ item }}'
+  args:
+    chdir: '{{ openvpn.easyrsa.dir}}'
+    creates: '{{ openvpn.easyrsa.dir}}/keys/{{ item }}.crt'
+  with_items:
+    - '{{ openvpn_conf.clients }}'
+
+- name: copy openvpn cert to openvpn dir
+  shell: bash -lc "cp dh2048.pem ca.crt server.crt server.key /etc/openvpn"
+  args:
+    chdir: '{{ openvpn.easyrsa.dir}}/keys'
+
+- name: manage client config
+  template:
+    src: templates/ovpn.conf
+    dest: '{{ openvpn_conf.client_conf_dir }}/{{ item }}/client.ovpn'
+  with_items:
+    - '{{ openvpn_conf.clients }}'
+
+# this better to do with file.
+- name: copy client keys in client_dir
+  shell: bash -lc "cp /etc/openvpn/ca.crt {{ openvpn_conf.client_conf_dir }}/{{ item }} && cp /opt/easyrsa/keys/client.crt /opt/easyrsa/keys/client.key {{ openvpn_conf.client_conf_dir }}/{{ item }}"
+  with_items:
+    - '{{ openvpn_conf.clients }}'
+
+- name: ensure services running
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  with_items:
+    - "{{ openvpn.services }}"

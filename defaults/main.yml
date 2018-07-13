@@ -1,0 +1,16 @@
+---
+# defaults file for openvpn-role
+openvpn_conf:
+  name: ov
+  server_name: ov.example.com
+  cipher: 'AES-128-CBC'
+  port: 1194
+  client_conf_dir: '/srv/openvpn_clients'
+  firewalld: false
+  clients:
+    - 'client'
+  opts:
+    - 'persist-key'
+    - 'persist-tun'
+    - 'sndbuf 393216'
+    - 'rcvbuf 393216'
